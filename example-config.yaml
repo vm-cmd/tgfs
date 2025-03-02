@@ -29,3 +29,9 @@ manager:
   bot:
     token: your_bot_token (optional, apply from @BotFather)
     chat_id: your_chat_id (optional, the chat id between you and your bot. The bot will not reply/send anything to other chats.)
+  jwt:
+    # This is a server-side secret used for signing JWT tokens, automatically generated during setup
+    # Users do not need to know or provide this value during login
+    secret: your_jwt_secret
+    algorithm: HS256
+    life: 604800  # Token lifetime in seconds (7 days)

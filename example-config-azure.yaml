@@ -2,32 +2,37 @@ azure:
   key_vault:
     url: https://your-keyvault-name.vault.azure.net/
     enabled: true
+    # The values below are the NAMES of secrets in Azure Key Vault, not the actual secret values
+    # For example, 'api_id: tgfs-api-id' means TGFS will look for a secret named 'tgfs-api-id' in Key Vault
+    # to get the actual Telegram API ID value
     secret_mapping:
       api_id: tgfs-api-id
       api_hash: tgfs-api-hash
       bot_token: tgfs-bot-token
       private_file_channel: tgfs-private-file-channel
       password: tgfs-user-password
-      jwt_secret: tgfs-jwt-secret
+      jwt_secret: tgfs-jwt-secret  # Server-side secret for JWT token signing, not user-provided
 
 telegram:
-  # These values will be overridden by Key Vault if enabled
-  api_id: your_api_id (mandatory, refer to README)
-  api_hash: your_api_hash (mandatory, refer to README)
+  # When Key Vault is enabled, these values are ignored and replaced with values from Key Vault
+  # You can leave these as placeholders or empty values when using Key Vault
+  api_id: 0  # Will be replaced with value from Key Vault secret 'tgfs-api-id'
+  api_hash: ""  # Will be replaced with value from Key Vault secret 'tgfs-api-hash'
   account:
     session_file: ~/.tgfs/account.session
   bot:
-    token: your_bot_token (mandatory, apply from @BotFather)
+    token: ""  # Will be replaced with value from Key Vault secret 'tgfs-bot-token'
     session_file: ~/.tgfs/bot.session
   login_timeout: 300000
-  private_file_channel: your_channel_id (mandatory, refer to README)
+  private_file_channel: ""  # Will be replaced with value from Key Vault secret 'tgfs-private-file-channel'
   public_file_channel: 0
 
 tgfs:
   users:
     user:
       # Password will be loaded from Key Vault as tgfs-user-password-user if enabled
-      password: password
+      # The -user suffix is added to the base secret name defined in secret_mapping
+      password: ""  # Will be replaced with value from Key Vault secret 'tgfs-user-password-user'
   download:
     chunk_size_kb: 1024
 
@@ -41,10 +46,12 @@ manager:
   port: 1901
   path: /
   bot:
-    token: your_bot_token (optional, apply from @BotFather)
-    chat_id: your_chat_id (optional, the chat id between you and your bot)
+    token: ""  # Optional: Will be replaced with value from Key Vault if configured
+    chat_id: 0  # Optional: The chat id between you and your bot
   jwt:
     # Secret will be loaded from Key Vault as tgfs-jwt-secret if enabled
-    secret: your_jwt_secret
+    # This is a server-side secret used for signing JWT tokens, automatically generated during setup
+    # Users do not need to know or provide this value during login
+    secret: ""  # Will be replaced with value from Key Vault secret 'tgfs-jwt-secret'
     algorithm: HS256
-    life: 604800 
+    life: 604800  # Token lifetime in seconds (7 days) 

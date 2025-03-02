@@ -164,9 +164,44 @@ TGFS supports storing sensitive configuration values in Azure Key Vault. This is
 4. Grant the managed identity "Get" permissions for secrets in the Key Vault
 5. Configure TGFS to use Azure Key Vault by setting the appropriate values in the config file
 
+### How Secret Mappings Work
+
+When using Azure Key Vault integration, the configuration file contains mappings between TGFS configuration keys and Azure Key Vault secret names:
+
+```yaml
+azure:
+  key_vault:
+    url: https://your-keyvault-name.vault.azure.net/
+    enabled: true
+    secret_mapping:
+      # These are the names of secrets in Azure Key Vault, not the actual values
+      api_id: tgfs-api-id
+      api_hash: tgfs-api-hash
+      bot_token: tgfs-bot-token
+      private_file_channel: tgfs-private-file-channel
+      password: tgfs-user-password
+      jwt_secret: tgfs-jwt-secret
+```
+
+Important notes about secret mappings:
+- The values in the `secret_mapping` section are the **names** of secrets in Azure Key Vault, not the actual sensitive values
+- At runtime, TGFS will retrieve the actual values from Key Vault using these secret names
+- For example, if `api_id` is mapped to `tgfs-api-id`, TGFS will look for a secret named `tgfs-api-id` in Key Vault
+- When using Key Vault, you should use placeholder values (or empty values) in the main configuration sections
+
 ### Example Configuration
 
 See `example-config-azure.yaml` for a complete example of how to configure Azure Key Vault integration.
+
+### Understanding JWT Secret Configuration
+
+The JWT secret is a server-side configuration value used for signing and verifying JSON Web Tokens. It is:
+- Automatically generated during initial setup
+- Not something users need to provide during login
+- Used by the server to authenticate users after they've logged in with their username/password
+- Stored securely in Azure Key Vault when Key Vault integration is enabled
+
+Users authenticate with their username and password, and the server uses the JWT secret to generate a token that the client can use for subsequent requests.
 
 ### Local Development
 

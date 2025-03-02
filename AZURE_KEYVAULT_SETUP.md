@@ -31,13 +31,48 @@ az keyvault secret set --vault-name your-keyvault-name --name tgfs-bot-token --v
 # Private File Channel ID
 az keyvault secret set --vault-name your-keyvault-name --name tgfs-private-file-channel --value "your-channel-id"
 
-# JWT Secret
-az keyvault secret set --vault-name your-keyvault-name --name tgfs-jwt-secret --value "your-jwt-secret"
+# JWT Secret (server-side configuration, automatically generated during setup)
+# Generate a random string for the JWT secret (64 characters is recommended)
+JWT_SECRET=$(openssl rand -base64 48)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-jwt-secret --value "$JWT_SECRET"
 
 # User Passwords (one for each user)
-az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-admin --value "admin-password"
-az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-user --value "user-password"
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-user --value "your-user-password"
+# Add more users as needed with the pattern: tgfs-user-password-{username}
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-admin --value "your-admin-password"
 ```
+
+> **Note**: Replace `your-keyvault-name` with your actual Key Vault name, and replace the placeholder values with your actual secrets.
+
+### Authentication for Secret Upload
+
+When uploading secrets to Azure Key Vault, you need to be properly authenticated. There are several ways to authenticate:
+
+1. **For local development**:
+   ```bash
+   # Login with your Azure account
+   az login
+   
+   # Verify you have access to the Key Vault
+   az keyvault list
+   ```
+
+2. **For Azure VMs with managed identity**:
+   - Ensure the VM has a managed identity assigned
+   - Grant the managed identity "Set" permissions for secrets in the Key Vault:
+   ```bash
+   # Get the VM's managed identity principal ID
+   PRINCIPAL_ID=$(az vm identity show --resource-group your-resource-group --name your-vm-name --query principalId -o tsv)
+   
+   # Grant the managed identity "Set" permissions for secrets in the Key Vault
+   az keyvault set-policy --name your-keyvault-name --object-id $PRINCIPAL_ID --secret-permissions get set list
+   ```
+
+3. **Using a service principal**:
+   ```bash
+   # Login with a service principal
+   az login --service-principal -u <app-id> -p <password> --tenant <tenant-id>
+   ```
 
 ## Setting Up Azure VM with Managed Identity
 
@@ -79,15 +114,22 @@ azure:
     url: https://your-keyvault-name.vault.azure.net/
     enabled: true
     secret_mapping:
+      # These are the names of secrets in Azure Key Vault, not the actual values
+      # The actual sensitive values are stored in Key Vault, not in this config file
       api_id: tgfs-api-id
       api_hash: tgfs-api-hash
       bot_token: tgfs-bot-token
       private_file_channel: tgfs-private-file-channel
       password: tgfs-user-password
-      jwt_secret: tgfs-jwt-secret
+      jwt_secret: tgfs-jwt-secret  # Server-side secret for JWT token signing, not user-provided
 
 # Rest of your configuration...
 ```
+
+When using Azure Key Vault integration:
+- The config file contains only the names of secrets in Key Vault, not the actual sensitive values
+- At runtime, TGFS will retrieve the actual values from Key Vault using these secret names
+- For example, if `api_id` is mapped to `tgfs-api-id`, TGFS will look for a secret named `tgfs-api-id` in Key Vault
 
 2. Run TGFS with the configuration file:
 
@@ -111,27 +153,95 @@ docker run -v /path/to/config-azure.yaml:/config.yaml -p 1900:1900 -p 1901:1901 
 
 ## Troubleshooting
 
-If you encounter issues with Azure Key Vault integration:
+If you encounter issues with Azure Key Vault integration, follow these steps to diagnose and resolve the problems:
 
-1. Enable Azure debugging:
+### Authentication Issues
 
-```bash
-export AZURE_DEBUG=true
-```
+The most common problem is authentication with Azure Key Vault. Here's how to troubleshoot:
 
-2. Check if the managed identity is working:
+1. **Check your authentication status**:
+   ```bash
+   # For user authentication
+   az account show
+   
+   # For managed identity (on Azure VM)
+   az login --identity
+   az account show
+   ```
 
-```bash
-az login --identity
-```
+2. **Verify Key Vault access**:
+   ```bash
+   # List Key Vaults you have access to
+   az keyvault list
+   
+   # List secrets in your Key Vault (to test read access)
+   az keyvault secret list --vault-name your-keyvault-name
+   
+   # Try to set a test secret (to test write access)
+   az keyvault secret set --vault-name your-keyvault-name --name test-secret --value test-value
+   ```
 
-3. Verify that the managed identity has access to the Key Vault:
+3. **Check Key Vault permissions**:
+   ```bash
+   # Get your current user's Object ID
+   USER_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
+   
+   # For managed identity, get the VM's Object ID
+   VM_OBJECT_ID=$(az vm identity show --resource-group your-resource-group --name your-vm-name --query principalId -o tsv)
+   
+   # Check access policies
+   az keyvault show --name your-keyvault-name --query properties.accessPolicies
+   ```
 
-```bash
-az keyvault secret list --vault-name your-keyvault-name
-```
+4. **Grant necessary permissions**:
+   ```bash
+   # For your user account
+   az keyvault set-policy --name your-keyvault-name --object-id $USER_OBJECT_ID --secret-permissions get set list
+   
+   # For managed identity
+   az keyvault set-policy --name your-keyvault-name --object-id $VM_OBJECT_ID --secret-permissions get set list
+   ```
 
-4. Check the logs for any Azure Key Vault related errors.
+### Configuration Issues
+
+If authentication is working but you're still having issues:
+
+1. **Enable Azure debugging**:
+   ```bash
+   export AZURE_DEBUG=true
+   ```
+
+2. **Verify secret names**:
+   - Make sure the secret names in your `secret_mapping` match exactly with the names in Azure Key Vault
+   - Secret names are case-sensitive
+
+3. **Check Key Vault URL**:
+   - Ensure the Key Vault URL is correct and includes the protocol (https://)
+   - The format should be: `https://your-keyvault-name.vault.azure.net/`
+
+4. **Verify secret values**:
+   - Check that the secrets exist in Key Vault with the expected names
+   ```bash
+   az keyvault secret show --vault-name your-keyvault-name --name tgfs-api-id
+   ```
+
+### Docker-specific Issues
+
+When running in Docker:
+
+1. **Mount Azure credentials**:
+   ```bash
+   # Create Azure credentials file
+   az login
+   
+   # Mount the credentials into the container
+   docker run -v ~/.azure:/root/.azure -v /path/to/config-azure.yaml:/config.yaml -p 1900:1900 -p 1901:1901 tgfs -f /config.yaml
+   ```
+
+2. **Use environment variables**:
+   ```bash
+   docker run -e AZURE_CLIENT_ID=your-client-id -e AZURE_CLIENT_SECRET=your-client-secret -e AZURE_TENANT_ID=your-tenant-id -v /path/to/config-azure.yaml:/config.yaml -p 1900:1900 -p 1901:1901 tgfs -f /config.yaml
+   ```
 
 ## Local Development
 
@@ -145,4 +255,56 @@ For local development or when running outside of Azure:
 export AZURE_CLIENT_ID=your-client-id
 export AZURE_CLIENT_SECRET=your-client-secret
 export AZURE_TENANT_ID=your-tenant-id
-``` 
+```
+
+## Common Error Messages and Solutions
+
+Here are some common error messages you might encounter and how to resolve them:
+
+### "Failed to initialize Azure Key Vault client"
+
+This usually means there's an issue with authentication or the Key Vault URL.
+
+**Solutions**:
+- Verify the Key Vault URL is correct
+- Check that you're authenticated with Azure (`az login`)
+- Ensure you have the necessary permissions on the Key Vault
+
+### "Failed to upload secrets to Azure Key Vault: Unauthorized"
+
+This means your account doesn't have permission to set secrets in the Key Vault.
+
+**Solutions**:
+- Grant your account "Set" permissions on the Key Vault:
+  ```bash
+  USER_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
+  az keyvault set-policy --name your-keyvault-name --object-id $USER_OBJECT_ID --secret-permissions get set list
+  ```
+
+### "Failed to retrieve secret: Secret not found"
+
+This means the secret with the specified name doesn't exist in the Key Vault.
+
+**Solutions**:
+- Verify the secret exists in the Key Vault:
+  ```bash
+  az keyvault secret list --vault-name your-keyvault-name
+  ```
+- Create the missing secret:
+  ```bash
+  az keyvault secret set --vault-name your-keyvault-name --name missing-secret-name --value "secret-value"
+  ```
+
+### "DefaultAzureCredential authentication failed"
+
+This means none of the authentication methods in the DefaultAzureCredential chain succeeded.
+
+**Solutions**:
+- For local development, run `az login`
+- For Azure VMs, ensure the VM has a managed identity
+- Set environment variables for service principal authentication:
+  ```bash
+  export AZURE_CLIENT_ID=your-client-id
+  export AZURE_CLIENT_SECRET=your-client-secret
+  export AZURE_TENANT_ID=your-tenant-id
+  ```

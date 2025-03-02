@@ -249,6 +249,17 @@ export const createConfig = async (): Promise<string> => {
     },
   );
   
+  // Get session file paths (needed regardless of Key Vault usage)
+  const accountSessionFile = await input.text(
+    'Where do you want to save the account session',
+    { default: '~/.tgfs/account.session' },
+  );
+  
+  const botSessionFile = await input.text(
+    'Where do you want to save the bot session',
+    { default: '~/.tgfs/bot.session' },
+  );
+  
   const jwtSecret = generateRandomSecret();
   const defaultPassword = 'password'; // Default password for the 'user' account
 
@@ -283,7 +294,7 @@ export const createConfig = async (): Promise<string> => {
       bot_token: await input.text('Secret name for bot token in Key Vault', { default: 'tgfs-bot-token' }),
       private_file_channel: await input.text('Secret name for private_file_channel in Key Vault', { default: 'tgfs-private-file-channel' }),
       password: await input.text('Base secret name for user passwords in Key Vault (will be suffixed with username)', { default: 'tgfs-user-password' }),
-      jwt_secret: await input.text('Secret name for JWT secret in Key Vault', { default: 'tgfs-jwt-secret' }),
+      jwt_secret: await input.text('Secret name for JWT secret in Key Vault (server-side secret, automatically generated)', { default: 'tgfs-jwt-secret' }),
     };
 
     azureConfig = {
@@ -308,27 +319,51 @@ export const createConfig = async (): Promise<string> => {
         if (uploadSecrets) {
           Logger.info('Uploading secrets to Azure Key Vault...');
           
-          const uploadPromises = [
-            keyVaultClient.setSecret(secretMapping.api_id, apiId),
-            keyVaultClient.setSecret(secretMapping.api_hash, apiHash),
-            keyVaultClient.setSecret(secretMapping.bot_token, botToken),
-            keyVaultClient.setSecret(secretMapping.private_file_channel, privateFileChannel),
-            keyVaultClient.setSecret(secretMapping.jwt_secret, jwtSecret),
-            keyVaultClient.setSecret(`${secretMapping.password}-user`, defaultPassword)
-          ];
-          
-          const results = await Promise.all(uploadPromises);
-          secretsUploaded = results.every(result => result === true);
-          
-          if (secretsUploaded) {
-            Logger.info('All secrets successfully uploaded to Azure Key Vault');
-          } else {
-            Logger.warn('Some secrets could not be uploaded to Azure Key Vault');
+          try {
+            // Test authentication by trying to set a single secret first
+            const testResult = await keyVaultClient.setSecret('tgfs-test-secret', 'test-value');
+            if (!testResult) {
+              throw new Error('Authentication test failed');
+            }
+            
+            const uploadPromises = [
+              keyVaultClient.setSecret(secretMapping.api_id, apiId),
+              keyVaultClient.setSecret(secretMapping.api_hash, apiHash),
+              keyVaultClient.setSecret(secretMapping.bot_token, botToken),
+              keyVaultClient.setSecret(secretMapping.private_file_channel, privateFileChannel),
+              keyVaultClient.setSecret(secretMapping.jwt_secret, jwtSecret),
+              keyVaultClient.setSecret(`${secretMapping.password}-user`, defaultPassword)
+            ];
+            
+            const results = await Promise.all(uploadPromises);
+            secretsUploaded = results.every(result => result === true);
+            
+            if (secretsUploaded) {
+              Logger.info('All secrets successfully uploaded to Azure Key Vault');
+            } else {
+              Logger.warn('Some secrets could not be uploaded to Azure Key Vault');
+              Logger.warn('You will need to manually upload the secrets using the Azure CLI or Portal');
+              Logger.warn('See AZURE_KEYVAULT_SETUP.md for instructions');
+            }
+          } catch (uploadError) {
+            Logger.error(`Failed to upload secrets to Azure Key Vault: ${uploadError.message}`);
+            Logger.warn('This is likely due to authentication issues with Azure Key Vault.');
+            Logger.warn('Make sure you have the necessary permissions and are authenticated with Azure.');
+            Logger.warn('For local development, run "az login" before running this script.');
+            Logger.warn('For Azure VMs, ensure the VM has a managed identity with "Set" permissions on the Key Vault.');
+            Logger.warn('You will need to manually upload the secrets using the Azure CLI or Portal');
+            Logger.warn('See AZURE_KEYVAULT_SETUP.md for instructions');
           }
         }
+      } else {
+        Logger.warn('Azure Key Vault client initialization failed.');
+        Logger.warn('You will need to manually upload the secrets using the Azure CLI or Portal');
+        Logger.warn('See AZURE_KEYVAULT_SETUP.md for instructions');
       }
     } catch (error) {
       Logger.error(`Failed to initialize Azure Key Vault client: ${error.message}`);
+      Logger.warn('You will need to manually upload the secrets using the Azure CLI or Portal');
+      Logger.warn('See AZURE_KEYVAULT_SETUP.md for instructions');
     }
   }
 
@@ -336,19 +371,15 @@ export const createConfig = async (): Promise<string> => {
   const res: Config = {
     azure: azureConfig,
     telegram: {
+      // When using Key Vault, we store placeholder values in the config file
+      // The actual values will be loaded from Key Vault at runtime
       api_id: useAzureKeyVault ? 0 : Number(apiId), // Use placeholder for Key Vault
       api_hash: useAzureKeyVault ? "" : apiHash, // Use placeholder for Key Vault
       account: {
-        session_file: await input.text(
-          'Where do you want to save the account session',
-          { default: '~/.tgfs/account.session' },
-        ),
+        session_file: accountSessionFile,
       },
       bot: {
-        session_file: await input.text(
-          'Where do you want to save the bot session',
-          { default: '~/.tgfs/bot.session' },
-        ),
+        session_file: botSessionFile,
         token: useAzureKeyVault ? "" : botToken, // Use placeholder for Key Vault
       },
       private_file_channel: useAzureKeyVault ? "" : privateFileChannel, // Use placeholder for Key Vault
