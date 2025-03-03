@@ -261,7 +261,23 @@ export const createConfig = async (): Promise<string> => {
   );
   
   const jwtSecret = generateRandomSecret();
-  const defaultPassword = 'password'; // Default password for the 'user' account
+  let userPassword = 'password'; // Default password for the 'user' account
+
+  // If not using Key Vault, ask for a password directly
+  if (!useAzureKeyVault) {
+    userPassword = await input.text(
+      'Enter a password for the default user account',
+      { 
+        default: 'password',
+        validate: (value) => {
+          if (value.length < 6) {
+            return 'Password must be at least 6 characters long';
+          }
+          return true;
+        }
+      }
+    );
+  }
 
   let azureConfig = undefined;
   let keyVaultClient = null;
@@ -296,6 +312,20 @@ export const createConfig = async (): Promise<string> => {
       password: await input.text('Base secret name for user passwords in Key Vault (will be suffixed with username)', { default: 'tgfs-user-password' }),
       jwt_secret: await input.text('Secret name for JWT secret in Key Vault (server-side secret, automatically generated)', { default: 'tgfs-jwt-secret' }),
     };
+
+    // Ask for the user password even when using Key Vault
+    userPassword = await input.text(
+      'Enter a password for the default user account (will be stored in Key Vault)',
+      { 
+        default: 'password',
+        validate: (value) => {
+          if (value.length < 6) {
+            return 'Password must be at least 6 characters long';
+          }
+          return true;
+        }
+      }
+    );
 
     azureConfig = {
       key_vault: {
@@ -332,7 +362,7 @@ export const createConfig = async (): Promise<string> => {
               keyVaultClient.setSecret(secretMapping.bot_token, botToken),
               keyVaultClient.setSecret(secretMapping.private_file_channel, privateFileChannel),
               keyVaultClient.setSecret(secretMapping.jwt_secret, jwtSecret),
-              keyVaultClient.setSecret(`${secretMapping.password}-user`, defaultPassword)
+              keyVaultClient.setSecret(`${secretMapping.password}-user`, userPassword)
             ];
             
             const results = await Promise.all(uploadPromises);
@@ -388,7 +418,7 @@ export const createConfig = async (): Promise<string> => {
     tgfs: {
       users: {
         user: {
-          password: useAzureKeyVault ? "" : defaultPassword, // Use placeholder for Key Vault
+          password: useAzureKeyVault ? "" : userPassword, // Use placeholder for Key Vault
         },
       },
       download: {
