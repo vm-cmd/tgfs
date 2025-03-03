@@ -19,6 +19,8 @@ export type Config = {
         private_file_channel?: string;
         password?: string;
         jwt_secret?: string;
+        https_cert?: string;
+        https_key?: string;
       };
     };
   };
@@ -32,6 +34,7 @@ export type Config = {
       token: string;
       session_file: string;
     };
+    login_timeout: number;
     private_file_channel: string;
     public_file_channel: string;
   };
@@ -49,11 +52,21 @@ export type Config = {
     host: string;
     port: number;
     path: string;
+    https?: {
+      enabled: boolean;
+      cert: string;
+      key: string;
+    };
   };
   manager: {
     host: string;
     port: number;
     path: string;
+    https?: {
+      enabled: boolean;
+      cert: string;
+      key: string;
+    };
     bot: {
       token: string;
       chat_id: number;
@@ -125,6 +138,44 @@ export const loadConfig = async (configPath: string): Promise<Config> => {
     ? await getSecretOrDefault(keyVaultClient, secretMapping.jwt_secret, cfg['manager']['jwt']['secret'])
     : cfg['manager']['jwt']['secret'];
 
+  // Load SSL Certificate and Key if HTTPS is enabled
+  let httpsCertSecret = '';
+  let httpsKeySecret = '';
+  
+  // Check if HTTPS is enabled for either WebDAV or Manager
+  const webdavHttpsEnabled = cfg['webdav']?.['https']?.['enabled'] === true;
+  const managerHttpsEnabled = cfg['manager']?.['https']?.['enabled'] === true;
+  
+  if ((webdavHttpsEnabled || managerHttpsEnabled) && useKeyVault) {
+    // Load certificate from Key Vault if configured
+    if (secretMapping.https_cert) {
+      httpsCertSecret = await getSecretOrDefault(
+        keyVaultClient,
+        secretMapping.https_cert,
+        webdavHttpsEnabled ? cfg['webdav']['https']['cert'] : (managerHttpsEnabled ? cfg['manager']['https']['cert'] : '')
+      );
+      
+      // Don't write to disk, just log that we retrieved it
+      if (httpsCertSecret && httpsCertSecret.includes('-----BEGIN CERTIFICATE-----')) {
+        Logger.info(`Retrieved certificate from Key Vault (${secretMapping.https_cert})`);
+      }
+    }
+    
+    // Load private key from Key Vault if configured
+    if (secretMapping.https_key) {
+      httpsKeySecret = await getSecretOrDefault(
+        keyVaultClient,
+        secretMapping.https_key,
+        webdavHttpsEnabled ? cfg['webdav']['https']['key'] : (managerHttpsEnabled ? cfg['manager']['https']['key'] : '')
+      );
+      
+      // Don't write to disk, just log that we retrieved it
+      if (httpsKeySecret && httpsKeySecret.includes('-----BEGIN PRIVATE KEY-----')) {
+        Logger.info(`Retrieved private key from Key Vault (${secretMapping.https_key})`);
+      }
+    }
+  }
+
   // Load user passwords
   const users = cfg['tgfs']['users'] || {};
   if (useKeyVault && secretMapping.password) {
@@ -154,6 +205,7 @@ export const loadConfig = async (configPath: string): Promise<Config> => {
           cfg['telegram']['bot']['session_file'],
         ),
       },
+      login_timeout: cfg['telegram']['login_timeout'] ?? 300000,
       private_file_channel: `-100${privateFileChannelSecret}`,
       public_file_channel: cfg['telegram']['public_file_channel'],
     },
@@ -167,11 +219,21 @@ export const loadConfig = async (configPath: string): Promise<Config> => {
       host: cfg['webdav']['host'] ?? '0.0.0.0',
       port: cfg['webdav']['port'] ?? 1900,
       path: cfg['webdav']['path'] ?? '/',
+      https: {
+        ...cfg['webdav']['https'],
+        cert: httpsCertSecret || cfg['webdav']['https']?.['cert'] || '',
+        key: httpsKeySecret || cfg['webdav']['https']?.['key'] || '',
+      },
     },
     manager: {
       host: cfg['manager']['host'] ?? '0.0.0.0',
       port: cfg['manager']['port'] ?? 1901,
       path: cfg['manager']['path'] ?? '/',
+      https: {
+        ...cfg['manager']['https'],
+        cert: httpsCertSecret || cfg['manager']['https']?.['cert'] || '',
+        key: httpsKeySecret || cfg['manager']['https']?.['key'] || '',
+      },
       bot: {
         token: cfg['manager']['bot']['token'],
         chat_id: cfg['manager']['bot']['chat_id'],
@@ -223,11 +285,39 @@ export const createConfig = async (): Promise<string> => {
     { default: true }
   );
 
+  const useHttps = await input.confirm(
+    'Do you want to enable HTTPS for WebDAV and manager servers? (Recommended for security)',
+    { default: false }
+  );
+
+  let httpsCert = '';
+  let httpsKey = '';
+
+  if (useHttps) {
+    httpsCert = await input.text(
+      'Path to SSL certificate file (.pem)',
+      { validate: validateNotEmpty }
+    );
+    
+    httpsKey = await input.text(
+      'Path to SSL private key file (.pem)',
+      { validate: validateNotEmpty }
+    );
+  }
+
   // Collect all sensitive information
   const apiId = await input.text(
     'Visit https://my.telegram.org/apps, create an app and paste the app_id, app_token here\nApp api_id',
     {
-      validate: validateNotEmpty,
+      validate: (value) => {
+        if (!validateNotEmpty(value)) {
+          return 'This field is mandatory!';
+        }
+        if (isNaN(Number(value))) {
+          return 'API ID must be a number';
+        }
+        return true;
+      },
     },
   );
   
@@ -288,6 +378,8 @@ export const createConfig = async (): Promise<string> => {
     private_file_channel: string;
     password: string;
     jwt_secret: string;
+    https_cert?: string;
+    https_key?: string;
   } = {
     api_id: '',
     api_hash: '',
@@ -311,6 +403,8 @@ export const createConfig = async (): Promise<string> => {
       private_file_channel: await input.text('Secret name for private_file_channel in Key Vault', { default: 'tgfs-private-file-channel' }),
       password: await input.text('Base secret name for user passwords in Key Vault (will be suffixed with username)', { default: 'tgfs-user-password' }),
       jwt_secret: await input.text('Secret name for JWT secret in Key Vault (server-side secret, automatically generated)', { default: 'tgfs-jwt-secret' }),
+      https_cert: await input.text('Secret name for SSL certificate in Key Vault', { default: 'tgfs-https-cert' }),
+      https_key: await input.text('Secret name for SSL private key in Key Vault', { default: 'tgfs-https-key' }),
     };
 
     // Ask for the user password even when using Key Vault
@@ -362,6 +456,8 @@ export const createConfig = async (): Promise<string> => {
               keyVaultClient.setSecret(secretMapping.bot_token, botToken),
               keyVaultClient.setSecret(secretMapping.private_file_channel, privateFileChannel),
               keyVaultClient.setSecret(secretMapping.jwt_secret, jwtSecret),
+              keyVaultClient.setSecret(secretMapping.https_cert, httpsCert),
+              keyVaultClient.setSecret(secretMapping.https_key, httpsKey),
               keyVaultClient.setSecret(`${secretMapping.password}-user`, userPassword)
             ];
             
@@ -401,24 +497,23 @@ export const createConfig = async (): Promise<string> => {
   const res: Config = {
     azure: azureConfig,
     telegram: {
-      // When using Key Vault, we store placeholder values in the config file
-      // The actual values will be loaded from Key Vault at runtime
-      api_id: useAzureKeyVault ? 0 : Number(apiId), // Use placeholder for Key Vault
-      api_hash: useAzureKeyVault ? "" : apiHash, // Use placeholder for Key Vault
+      api_id: useAzureKeyVault ? 0 : Number(apiId),
+      api_hash: useAzureKeyVault ? '' : apiHash,
       account: {
-        session_file: accountSessionFile,
+        session_file: path.join(os.homedir(), '.tgfs', 'account.session'),
       },
       bot: {
-        session_file: botSessionFile,
-        token: useAzureKeyVault ? "" : botToken, // Use placeholder for Key Vault
+        token: useAzureKeyVault ? '' : botToken,
+        session_file: path.join(os.homedir(), '.tgfs', 'bot.session'),
       },
-      private_file_channel: useAzureKeyVault ? "" : privateFileChannel, // Use placeholder for Key Vault
-      public_file_channel: '',
+      login_timeout: 300000,
+      private_file_channel: useAzureKeyVault ? '' : privateFileChannel,
+      public_file_channel: '0',
     },
     tgfs: {
       users: {
         user: {
-          password: useAzureKeyVault ? "" : userPassword, // Use placeholder for Key Vault
+          password: useAzureKeyVault ? '' : userPassword,
         },
       },
       download: {
@@ -429,11 +524,21 @@ export const createConfig = async (): Promise<string> => {
       host: '0.0.0.0',
       port: 1900,
       path: '/',
+      https: {
+        enabled: useHttps,
+        cert: httpsCert,
+        key: httpsKey,
+      },
     },
     manager: {
       host: '0.0.0.0',
       port: 1901,
       path: '/',
+      https: {
+        enabled: useHttps,
+        cert: httpsCert,
+        key: httpsKey,
+      },
       bot: {
         token: '',
         chat_id: 0,
@@ -460,6 +565,8 @@ export const createConfig = async (): Promise<string> => {
 # - Bot Token: ${secretMapping.bot_token}
 # - Private File Channel: ${secretMapping.private_file_channel}
 # - JWT Secret: ${secretMapping.jwt_secret}
+# - SSL Certificate: ${secretMapping.https_cert}
+# - SSL Private Key: ${secretMapping.https_key}
 # - User Passwords: ${secretMapping.password}-{username}
 #` + 
 (secretsUploaded ? 

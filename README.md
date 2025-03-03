@@ -124,6 +124,8 @@ A config file will be auto-generated when you run the program for the first time
       - private_file_channel: Secret name for the Private File Channel ID
       - password: Base secret name for user passwords (will be suffixed with username)
       - jwt_secret: Secret name for the JWT Secret
+      - https_cert: Secret name for the SSL certificate in PEM format
+      - https_key: Secret name for the SSL private key in PEM format
 
 - telegram
 
@@ -141,6 +143,21 @@ A config file will be auto-generated when you run the program for the first time
   - host: The host of the WebDAV server listening on.
   - port: The port of the WebDAV server listening on.
   - path: The root path for the WebDAV server. For example, setting this value to /webdav makes the WebDAV link `http://[host]:[port]/webdav`.
+  - https:
+    - enabled: Whether to enable HTTPS for the WebDAV server.
+    - cert: Path to the SSL certificate file (.pem).
+    - key: Path to the SSL private key file (.pem).
+
+- manager
+  - host: The host of the manager server listening on.
+  - port: The port of the manager server listening on.
+  - path: The root path for the manager server.
+  - https:
+    - enabled: Whether to enable HTTPS for the manager server.
+    - cert: Path to the SSL certificate file (.pem).
+    - key: Path to the SSL private key file (.pem).
+  - bot: Configuration for the Telegram bot used by the manager.
+  - jwt: Configuration for JWT authentication.
 
 ## FAQ
 
@@ -181,6 +198,8 @@ azure:
       private_file_channel: tgfs-private-file-channel
       password: tgfs-user-password
       jwt_secret: tgfs-jwt-secret
+      https_cert: tgfs-https-cert
+      https_key: tgfs-https-key
 ```
 
 Important notes about secret mappings:
@@ -188,6 +207,7 @@ Important notes about secret mappings:
 - At runtime, TGFS will retrieve the actual values from Key Vault using these secret names
 - For example, if `api_id` is mapped to `tgfs-api-id`, TGFS will look for a secret named `tgfs-api-id` in Key Vault
 - When using Key Vault, you should use placeholder values (or empty values) in the main configuration sections
+- For SSL certificates and keys, you can store the entire PEM content in Key Vault. TGFS will automatically extract it to a temporary file at runtime.
 
 ### Example Configuration
 
@@ -209,3 +229,75 @@ For local development or when running outside of Azure, you can:
 1. Set `azure.key_vault.enabled` to `false` to use values directly from the config file
 2. Use Azure CLI to authenticate (`az login`) before running TGFS
 3. Use environment variables for Azure authentication
+
+## HTTPS Security
+
+TGFS supports HTTPS for both the WebDAV and manager servers, which is strongly recommended for production use. HTTPS provides:
+
+1. **Encryption**: All data transmitted between clients and TGFS is encrypted
+2. **Authentication**: Clients can verify they're connecting to the legitimate TGFS server
+3. **Data Integrity**: Prevents tampering with data in transit
+
+### Setting up HTTPS
+
+To enable HTTPS:
+
+1. Set `https.enabled` to `true` in the WebDAV and/or manager sections of your config
+2. Provide paths to valid SSL certificate and key files in PEM format
+3. For production use, obtain a certificate from a trusted Certificate Authority (CA)
+4. For testing, you can generate a self-signed certificate:
+
+```bash
+# Generate a self-signed certificate (for testing only)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+```
+
+### Certificate Storage Options
+
+You have two options for storing SSL certificates:
+
+1. **File System**: Store certificate and key files on disk and reference them in the config
+   - Ensure files have restricted permissions (chmod 600)
+   - Keep them in a secure location
+
+2. **Azure Key Vault** (Recommended for production):
+   - Store the entire PEM content of certificates and keys in Key Vault
+   - Configure the `https_cert` and `https_key` secret mappings
+   - TGFS will load certificates directly into memory at runtime
+   - No sensitive data is written to disk
+
+### Certificate Formats
+
+TGFS supports two ways to provide certificates:
+
+1. **File Path**: Provide the path to certificate and key files on disk
+   ```yaml
+   https:
+     enabled: true
+     cert: /path/to/cert.pem
+     key: /path/to/key.pem
+   ```
+
+2. **PEM Content**: When using Azure Key Vault, store the entire PEM content
+   - The content should include the full certificate with BEGIN/END markers
+   - Example certificate format:
+     ```
+     -----BEGIN CERTIFICATE-----
+     MIIDazCCAlOgAwIBAgIUJlq+zz4...
+     ...
+     -----END CERTIFICATE-----
+     ```
+   - Example private key format:
+     ```
+     -----BEGIN PRIVATE KEY-----
+     MIIEvgIBADANBgkqhkiG9w0BAQE...
+     ...
+     -----END PRIVATE KEY-----
+     ```
+
+### Certificate Rotation
+
+When using Azure Key Vault, certificate rotation becomes easier:
+1. Upload new certificate and key to the same secret names in Key Vault
+2. Restart TGFS - it will automatically use the new certificate
+3. No need to update local files or configuration

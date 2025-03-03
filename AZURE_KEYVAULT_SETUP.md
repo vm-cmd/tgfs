@@ -31,22 +31,67 @@ az keyvault secret set --vault-name your-keyvault-name --name tgfs-bot-token --v
 # Private File Channel ID
 az keyvault secret set --vault-name your-keyvault-name --name tgfs-private-file-channel --value "your-channel-id"
 
-# JWT Secret (server-side configuration, automatically generated during setup)
-# Generate a random string for the JWT secret (64 characters is recommended)
-JWT_SECRET=$(openssl rand -base64 48)
-az keyvault secret set --vault-name your-keyvault-name --name tgfs-jwt-secret --value "$JWT_SECRET"
+# JWT Secret (for authentication)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-jwt-secret --value "your-jwt-secret"
 
-# User Passwords (one for each user)
-az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-user --value "your-user-password"
-# Add more users as needed with the pattern: tgfs-user-password-{username}
-az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-admin --value "your-admin-password"
+# User Password (will be suffixed with username)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-user-password-user --value "your-password"
 ```
 
-> **Note**: Replace `your-keyvault-name` with your actual Key Vault name, and replace the placeholder values with your actual secrets.
+## Storing SSL Certificates in Key Vault
 
-### Authentication for Secret Upload
+For enhanced security, you can store SSL certificates and private keys directly in Azure Key Vault:
 
-When uploading secrets to Azure Key Vault, you need to be properly authenticated. There are several ways to authenticate:
+1. Prepare your certificate and private key files in PEM format.
+
+2. Store the entire PEM content as secrets in Key Vault:
+
+```bash
+# Store SSL certificate (use --file to read from a file)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-https-cert --file /path/to/cert.pem
+
+# Store SSL private key (use --file to read from a file)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-https-key --file /path/to/key.pem
+```
+
+Alternatively, you can store the content directly:
+
+```bash
+# Store SSL certificate (use multiline string)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-https-cert --value "$(cat /path/to/cert.pem)"
+
+# Store SSL private key (use multiline string)
+az keyvault secret set --vault-name your-keyvault-name --name tgfs-https-key --value "$(cat /path/to/key.pem)"
+```
+
+3. Configure TGFS to use these secrets by updating your config.yaml:
+
+```yaml
+azure:
+  key_vault:
+    url: https://your-keyvault-name.vault.azure.net/
+    enabled: true
+    secret_mapping:
+      # ... other mappings ...
+      https_cert: tgfs-https-cert
+      https_key: tgfs-https-key
+
+webdav:
+  # ... other settings ...
+  https:
+    enabled: true
+    cert: ""  # Will be loaded from Key Vault
+    key: ""   # Will be loaded from Key Vault
+
+manager:
+  # ... other settings ...
+  https:
+    enabled: true
+    cert: ""  # Will be loaded from Key Vault
+    key: ""   # Will be loaded from Key Vault
+```
+
+TGFS will load the certificate and key directly into memory at runtime, without writing them to disk.
 
 1. **For local development**:
    ```bash
