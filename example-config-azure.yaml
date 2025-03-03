@@ -1,0 +1,71 @@
+azure:
+  key_vault:
+    url: https://your-keyvault-name.vault.azure.net/
+    enabled: true
+    # The values below are the NAMES of secrets in Azure Key Vault, not the actual secret values
+    # For example, 'api_id: tgfs-api-id' means TGFS will look for a secret named 'tgfs-api-id' in Key Vault
+    # to get the actual Telegram API ID value
+    secret_mapping:
+      api_id: tgfs-api-id
+      api_hash: tgfs-api-hash
+      bot_token: tgfs-bot-token
+      private_file_channel: tgfs-private-file-channel
+      password: tgfs-user-password
+      jwt_secret: tgfs-jwt-secret  # Server-side secret for JWT token signing, not user-provided
+      https_cert: tgfs-https-cert  # SSL certificate in PEM format (contains both cert and key)
+      https_key: tgfs-https-cert   # Use the same secret as https_cert for auto-rotation
+
+telegram:
+  # When Key Vault is enabled, these values are ignored and replaced with values from Key Vault
+  # You can leave these as placeholders or empty values when using Key Vault
+  api_id: 0  # Will be replaced with value from Key Vault secret 'tgfs-api-id'
+  api_hash: ""  # Will be replaced with value from Key Vault secret 'tgfs-api-hash'
+  account:
+    session_file: ~/.tgfs/account.session
+  bot:
+    token: ""  # Will be replaced with value from Key Vault secret 'tgfs-bot-token'
+    session_file: ~/.tgfs/bot.session
+  login_timeout: 300000
+  private_file_channel: ""  # Will be replaced with value from Key Vault secret 'tgfs-private-file-channel'
+  public_file_channel: "0"
+
+tgfs:
+  users:
+    user:
+      # Password will be loaded from Key Vault as tgfs-user-password-user if enabled
+      # The -user suffix is added to the base secret name defined in secret_mapping
+      password: ""  # Will be replaced with value from Key Vault secret 'tgfs-user-password-user'
+  download:
+    chunk_size_kb: 1024
+
+webdav:
+  host: 0.0.0.0
+  port: 1900
+  path: /
+  https:
+    enabled: false
+    # When Key Vault is enabled with https_cert and https_key secrets,
+    # these values can be empty as they will be loaded from Key Vault
+    cert: ""  # Will be replaced with value from Key Vault secret 'tgfs-https-cert'
+    key: ""   # Will be replaced with value from Key Vault secret 'tgfs-https-key'
+
+manager:
+  host: 0.0.0.0
+  port: 1901
+  path: /
+  https:
+    enabled: false
+    # When Key Vault is enabled with https_cert and https_key secrets,
+    # these values can be empty as they will be loaded from Key Vault
+    cert: ""  # Will be replaced with value from Key Vault secret 'tgfs-https-cert'
+    key: ""   # Will be replaced with value from Key Vault secret 'tgfs-https-key'
+  bot:
+    token: ""  # Optional: Will be replaced with value from Key Vault if configured
+    chat_id: 0  # Optional: The chat id between you and your bot
+  jwt:
+    # Secret will be loaded from Key Vault as tgfs-jwt-secret if enabled
+    # This is a server-side secret used for signing JWT tokens, automatically generated during setup
+    # Users do not need to know or provide this value during login
+    secret: ""  # Will be replaced with value from Key Vault secret 'tgfs-jwt-secret'
+    algorithm: HS256
+    life: 604800  # Token lifetime in seconds (7 days) 
